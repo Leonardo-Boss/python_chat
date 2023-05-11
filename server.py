@@ -56,6 +56,15 @@ def init_db():
 
 class Message_factory:
     @staticmethod
+    def get_messages(chatid):
+        cr = db.cursor()
+        cr.execute('SELECT id, author, text, created_utc FROM messages WHERE chat=?', (chatid,))
+        msgs = cr.fetchall()
+        cr.close()
+        chat = Chat_factory.id_get(chatid)
+        return [Message(msg[0], msg[1], chat, msg[2], msg[3]) for msg in msgs]
+
+    @staticmethod
     def id_get(id):
         cr = db.cursor()
         cr.execute('SELECT author, chat, text, created_utc FROM messages WHERE id=?', (id,))
@@ -63,11 +72,36 @@ class Message_factory:
         cr.close()
         return Message(id, author, chat, text, created_utc)
 
+    @staticmethod
+    def create_message(author, chatid, text, created_utc=None):
+        if not created_utc: created_utc = int(time.time())
+        chat = Chat_factory.id_get(chatid)
+        cr = db.cursor()
+        cr.execute('INSERT INTO messages (author, chat, text, created_utc) values (?, ?, ?, ?)', (author, chat.id, text, created_utc))
+        id = cr.lastrowid
+        if not id: return
+        message = Message(id, author, chat, text, created_utc)
+        db.commit()
+        cr.close()
+        return message
+
+class Message_Factory_Adapter:
+    @staticmethod
+    def send_message(data, user):
+        message = Message_factory.create_message(data['author'], data['chat'], data['text'])
+        if not message: return
+        return {'created': True, 'message':message.to_dict()}
+
+    @staticmethod
+    def get_messages(data, user):
+        msgs = Message_factory.get_messages(data['chatid'])
+        return [msg.to_dict() for msg in msgs]
+
 class Chat_factory:
     @staticmethod
     def create_chat(name, user):
         cr = db.cursor()
-        cr.execute('INSERT INTO chats (user_name) values(?)', (name,))
+        cr.execute('INSERT INTO chats (name) values(?)', (name,))
         chat_id = cr.lastrowid
         if not chat_id: return
         cr.execute('INSERT INTO chats_users (userid, chatid) values(?, ?)', (user.id, chat_id))
@@ -78,7 +112,7 @@ class Chat_factory:
         return chat
 
     @staticmethod
-    def add_user(chat, user):
+    def add_user(chat:Chat, user:User):
         cr = db.cursor()
         cr.execute('INSERT INTO chats_users (userid, chatid) values(?, ?)', (user.id, chat.id))
         db.commit()
@@ -87,13 +121,13 @@ class Chat_factory:
     @staticmethod
     def id_get(id):
         cr = db.cursor()
-        cr.execute('SELECT name, FROM chats WHERE id=?', (id,))
+        cr.execute('SELECT name FROM chats WHERE id=?', (id,))
         name = cr.fetchone()[0]
         cr.close()
         chat = Chat(id, name)
         Chat_factory.update_messages(chat)
         Chat_factory.update_users(chat)
-        return 
+        return chat
 
     @staticmethod
     def update_users(chat):
@@ -111,8 +145,31 @@ class Chat_factory:
         cr.close()
         return chat
 
+class Chat_Factory_Adapter:
+    @staticmethod
+    def create_chat(data, user):
+        if not (chat := Chat_factory.create_chat(data['name'], user)): return {'created':False}
+        return {'created':True, 'chat':chat.to_dict()}
+
+    @staticmethod
+    def add_user(data, user):
+        u = User_Factory.id_login(data['userid'])
+        c = Chat_factory.id_get(data['chatid'])
+        if not u: return {'added':'ufalse'}
+        if not c: return {'added':'cfalse'}
+        Chat_factory.add_user(c, u)
+        return {'added':True}
 
 class User_Factory:
+    @staticmethod
+    def get_users():
+        cr = db.cursor()
+        cr.execute('SELECT id, user_name FROM users')
+        all = cr.fetchall()
+        cr.close()
+        return all
+        
+
     @staticmethod
     def new_user_obj(id, name, password):
         user = User(id=id, name=name, password=password)
@@ -124,7 +181,8 @@ class User_Factory:
     def update_chats(user):
         cr = db.cursor()
         cr.execute('SELECT chatid FROM chats_users WHERE userid=?', (user.id,))
-        user.chats = [i[0] for i in cr.fetchall()]
+        all = cr.fetchall()
+        user.chats = [Chat_factory.id_get(i[0]) for i in all]
         cr.close()
         return user
 
@@ -158,8 +216,9 @@ class User_Factory:
     def get_new_cookie(user):
         cookie = random.randint(100000, 999999)
         cr = db.cursor()
-        cr.execute('INSERT INTO logged (userid, expires, cookie) values(?, ?, ?)', (user.id, time.time()+3600, cookie))
+        cr.execute('INSERT INTO logged (userid, expires, cookie) values(?, ?, ?)', (user.id, int(time.time())+3600, cookie))
         db.commit()
+        cr.execute('SELECT * FROM logged')
         cr.close()
         user.cookie = cookie
         return user
@@ -167,8 +226,10 @@ class User_Factory:
     @staticmethod
     def get_logged(cookie):
         cr = db.cursor()
-        cr.execute('SELECT userid FROM logged WHERE cookie=? and timestamp>? ORDER BY timestamp DESC', (cookie,))
-        id = cr.fetchone()[0]
+        print(cookie)
+        cr.execute('SELECT userid FROM logged WHERE cookie=? and expires>? ORDER BY expires DESC', (cookie, int(time.time())))
+        if not (r := cr.fetchone()): return
+        id = r[0]
         cr.close()
         return User_Factory.id_login(id)
 
@@ -216,17 +277,19 @@ class User_factory_request_adpater:
 
     @staticmethod
     def login(data):
-        try:
-            user = User_Factory.login(data['user_name'], data['password'])
-            if user:
-                return {'login':True, 'user':user.to_dict()}
-            return {'login':False}
-        except:
-            return {'login':False}
+        user = User_Factory.login(data['user_name'], data['password'])
+        if user:
+            print(user)
+            return {'login':True, 'user':user.to_dict()}
+        return {'login':False}
 
     @staticmethod
     def get_from_cookie(cookie):
         return User_Factory.get_logged(cookie)
+
+    @staticmethod
+    def get_users(data, user):
+        return User_Factory.get_users()
 
 # Define a simple HTTP request handler
 class RequestHandler(http.server.BaseHTTPRequestHandler):
@@ -250,6 +313,9 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
         elif (executer := post_paths_logged.get(self.path)) and cookie:
             user = User_factory_request_adpater.get_from_cookie(cookie)
+            if not user:
+                self.send_response(504)
+                return
             response = executer(post_data_dict, user)
 
         else:
@@ -273,7 +339,7 @@ class RequestHandler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     post_paths_not_logged:dict = {'/create_account': User_factory_request_adpater.create_user, '/login': User_factory_request_adpater.login}
-    post_paths_logged:dict = {}
+    post_paths_logged:dict = {'/create_chat': Chat_Factory_Adapter.create_chat, '/send_message': Message_Factory_Adapter.send_message, '/add_user': Chat_Factory_Adapter.add_user, '/get_users': User_factory_request_adpater.get_users, '/get_messages': Message_Factory_Adapter.get_messages}
 
     init_db()
     # Define the server address and port

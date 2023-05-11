@@ -1,0 +1,8 @@
+certifi==2023.5.7
+cffi==1.15.1
+charset-normalizer==3.1.0
+idna==3.4
+pyargon2==1.0.7
+pycparser==2.21
+requests==2.30.0
+urllib3==2.0.2

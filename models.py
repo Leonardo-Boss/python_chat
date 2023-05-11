@@ -21,7 +21,7 @@ class User:
     cookie:int|None = field(default_factory=lambda :None)
 
     def to_dict(self):
-       return {'id': self.id, 'name': self.name, 'chats':[chat.to_dict() for chat in self.chats], 'cookie':self.cookie}
+       return {'id': self.id, 'name': self.name, 'chats':[chat.to_dict() for chat in self.chats if chat], 'cookie':self.cookie}
 
 @dataclass
 class Chat:
