@@ -19,3 +19,5 @@ em outro terminal rode
 
 ## patterns usados
 O Factory pattern pode ser encontrado em varios locais do código, na criação dos objeto no servidor usando as classes terminadas em `Factory`, na criação dos objetos no cliente usando as funções começadas em `from_dict`. Adapter pattern foi usado no server.py para adaptar as requisições da classe Request_handler e as outras classes. Nas classes Chat, Message, User foi usado Composition
+
+codigo disponivel em https://github.com/Leonardo-Boss/python_chat
